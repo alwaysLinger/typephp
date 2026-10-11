@@ -43,6 +43,7 @@ final readonly class NativeBuilder
     /** @return array{command: string, output: list<string>, status: int, generated: bool} */
     public function link(array $objects, string $target, LinkOptions $options): array
     {
+        $this->ensureDirectory(dirname($target));
         $command = $this->linkCommand($objects, $target, $options);
         try {
             exec($command . ' 2>&1', $output, $status);
@@ -54,6 +55,13 @@ final readonly class NativeBuilder
             ];
         } finally {
             $this->cleanup();
+        }
+    }
+
+    private function ensureDirectory(string $directory): void
+    {
+        if (!is_dir($directory) && !mkdir($directory, 0777, true) && !is_dir($directory)) {
+            throw new \RuntimeException("Cannot create output directory: {$directory}");
         }
     }
 
