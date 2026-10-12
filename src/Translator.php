@@ -2967,7 +2967,11 @@ CODE;
         }
 
         $buildError = null;
-        $result = $this->getNativeBuilder()->link($objectFiles, $targetFile, $this->getLinkCommandOptions());
+        try {
+            $result = $this->getNativeBuilder()->link($objectFiles, $targetFile, $this->getLinkCommandOptions());
+        } catch (\RuntimeException $exception) {
+            $this->error($exception->getMessage());
+        }
         $this->climate->comment($result['command']);
         foreach ($result['output'] as $line) {
             $this->climate->out($line);
