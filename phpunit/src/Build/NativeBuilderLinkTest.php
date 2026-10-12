@@ -8,6 +8,7 @@
 
 namespace TypePhp\Tests\Build;
 
+use PHPUnit\Framework\Attributes\RequiresOperatingSystemFamily;
 use PHPUnit\Framework\TestCase;
 use TypePhp\Backend\CompilerBackend;
 use TypePhp\Build\LinkOptions;
@@ -17,6 +18,7 @@ use TypePhp\Build\NativeBuilder;
  * @internal
  * @coversNothing
  */
+#[RequiresOperatingSystemFamily('Linux')]
 final class NativeBuilderLinkTest extends TestCase
 {
     private string $directory;
