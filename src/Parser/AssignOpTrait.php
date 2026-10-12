@@ -2258,14 +2258,27 @@ trait AssignOpTrait
         $otherPresence = 'php::exists(' . $stableContainer . ', '
             . '{{php::ArrayDimFetch, ' . Type::VAR . '(' . $stableKey . ')}}, '
             . $selectedValue . ')';
-        $probe = '((' . $stableContainer . ' = ' . $container . '), ('
-            . $stableKey . ' = ' . $key . '), (' . $stableContainer . '.isObject() ? '
-            . $objectPresence . ' : ' . $otherPresence . '))';
+        $check = '(' . $stableContainer . '.isObject() ? '
+            . $objectPresence . ' : ' . $otherPresence . ')';
+
+        if ($containerPresence === null) {
+            $probe = '((' . $stableContainer . ' = ' . $container . '), ('
+                . $stableKey . ' = ' . $key . '), ' . $check . ')';
+            return [
+                'condition' => $probe,
+                'container' => $stableContainer,
+                'key' => $stableKey,
+            ];
+        }
+
+        $outerChecked = $this->addTmpVar(Type::VAR);
+        $condition = '((' . $outerChecked . ' = ' . $containerPresence . '), '
+            . '(' . $stableContainer . ' = ' . $container . '), '
+            . '(' . $stableKey . ' = ' . $key . '), '
+            . '(' . $outerChecked . ' && ' . $check . '))';
 
         return [
-            'condition' => $containerPresence === null
-                ? $probe
-                : '(' . $containerPresence . ' && ' . $probe . ')',
+            'condition' => $condition,
             'container' => $stableContainer,
             'key' => $stableKey,
         ];
