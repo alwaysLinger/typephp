@@ -2081,6 +2081,15 @@ trait AssignOpTrait
             } else {
                 $this->addLocalVar($var, Type::VAR);
             }
+        } elseif ($var === null
+            && $expr->var instanceof Expr\ArrayDimFetch
+            && $this->isVarExpr($expr->var->var)
+            && is_string($expr->var->var->name)
+        ) {
+            $rootName = $this->parseIdentifier($expr->var->var);
+            if (!$this->hasVar($rootName)) {
+                $this->addLocalVar($rootName, Type::VAR);
+            }
         }
         if ($var !== null && $this->isNativeObjectVar($var)) {
             $leftClass = $this->getNativeObjectVarClass($var);
