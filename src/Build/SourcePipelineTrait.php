@@ -109,12 +109,7 @@ trait SourcePipelineTrait
                 );
                 unset($resolvedFiles[$key]);
             } catch (SyntaxError $exception) {
-                $this->output(
-                    ' syntax error: ' . $exception->getMessage()
-                    . "\n skip: {$file}\n",
-                    'error',
-                );
-                unset($resolvedFiles[$key]);
+                $this->error('Syntax error in ' . $file . ': ' . $exception->getMessage());
             }
         }
 
@@ -887,8 +882,7 @@ trait SourcePipelineTrait
                     $this->registerUnsupportedSapiFile($file);
                     unset($files[$k]);
                 } catch (SyntaxError $e) {
-                    $this->output(' syntax error: ' . $e->getMessage() . "\n" . ' skip: ' . $file . "\n", 'error');
-                    unset($files[$k]);
+                    $this->error('Syntax error in ' . $file . ': ' . $e->getMessage());
                 }
             }
         }

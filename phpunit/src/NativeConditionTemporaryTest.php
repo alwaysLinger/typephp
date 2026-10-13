@@ -15,7 +15,9 @@ final class NativeConditionTemporaryTest extends BaseTest
         $code = file_get_contents($compiler->convertFile($source));
 
         preg_match_all('/(tmp_var_\d+) = php::toBool\(php::same\(/', $code, $matches);
-        self::assertCount(2, $matches[1]);
+        // The standalone comparison and both short-circuit operands need
+        // native bool snapshots so operand cleanup can finish before use.
+        self::assertCount(3, $matches[1]);
         foreach ($matches[1] as $temporary) {
             self::assertStringContainsString('php::Bool ' . $temporary . ' = 0;', $code);
         }

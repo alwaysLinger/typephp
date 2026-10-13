@@ -37,6 +37,10 @@ classified as Partial, an Intentional Rule, or a Hard Limit.
 - A statically known invalid operation should fail during compilation. A
   runtime-only invalid operation may use a stable PHPX error; its exact Zend
   error level, wording and timing are not part of the compatibility promise.
+- PHP syntax errors in compilation inputs must report the source file and line
+  as fatal compilation errors and terminate the build with a nonzero status.
+  Neither ordinary nor nano builds may drop the erroneous file and continue
+  producing an incomplete program.
 
 ## Review Decision
 

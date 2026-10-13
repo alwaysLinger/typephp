@@ -465,9 +465,8 @@ abstract class Preprocessor extends CompilerBase
             $this->climate->info('prepare: ' . $this->getRelativePath($this->file));
             try {
                 $ast = $this->getAstCache()->load($this->file, $phpCode);
-            } catch (\PhpParser\Error $e) {
-                $this->climate->red("Fatal error: {$e->getMessage()} in {$this->file}");
-                throw new SyntaxError($e->getMessage(), $e->getCode());
+            } catch (\PhpParser\Error $error) {
+                $this->fatalPhpParserError($error);
             }
 
             $this->stubImportLibrary = $this->stubFile && $this->hasLibraryImportAnnotation($ast)
