@@ -198,7 +198,10 @@ class TraitsTest extends TestCase
         $argInfo->type = 'php::Str';
 
         $result = $this->invoke('genPropertyPromotion', $argInfo);
-        $this->assertStringContainsString('this_.setProperty', $result);
+        $this->assertStringContainsString(
+            'typephp_write_property_scoped(this_, "title", title, nullptr)',
+            $result,
+        );
         $this->assertStringContainsString('title', $result);
     }
 
