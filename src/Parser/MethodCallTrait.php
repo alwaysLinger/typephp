@@ -1055,6 +1055,14 @@ trait MethodCallTrait
         try {
             $class = empty($class) ? self::DYNAMIC_CALLED_CLASS : $class;
             if (!$resolvedMethodPtr) {
+                if ($funcName === '') {
+                    return $this->parseResolvedMethodCall(
+                        $object,
+                        $methodPtr,
+                        $expr->args,
+                        $requiresDynamicScope && $this->methodDef,
+                    );
+                }
                 $callArgClass = $typedPropertyReceiver
                     ? ($typedPropertySignatureClass === ''
                         ? self::DYNAMIC_CALLED_CLASS

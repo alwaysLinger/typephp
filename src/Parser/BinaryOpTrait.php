@@ -1412,7 +1412,9 @@ trait BinaryOpTrait
         $this->assertExprCanBeUsedAsCondition($left, 'logical operand');
         $this->assertExprCanBeUsedAsCondition($right, 'logical operand');
 
-        $leftExpr = $this->parseNumericIdentifier($left);
+        // Finish the left operand, including reference bridge commits and
+        // postfix updates, before deciding whether to evaluate the right.
+        $leftExpr = $this->parseOrderedBinaryOperand($left);
         $this->checkVarMustExist($left, $leftExpr);
 
         $rightBeforeStmtCount = count($this->context->beforeStmtLines);

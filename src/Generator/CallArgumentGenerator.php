@@ -788,6 +788,175 @@ trait CallArgumentGenerator
         }
     }
 
+    /**
+     * Variable method names have no compile-time signature. Resolve once, then
+     * select each argument's value/reference path using that exact callee.
+     * Keep the bridges and argument owners inside the call expression so both
+     * normal completion and exception unwinding release arguments first.
+     */
+    protected function parseResolvedMethodCall(string $object, string $method, array $args, bool $scoped): string
+    {
+        $this->assertCallArgumentLimit($args);
+        $before = $this->context->beforeStmtLines;
+        $after = $this->context->afterStmtLines;
+        $this->context->beforeStmtLines = [];
+        $this->context->afterStmtLines = [];
+        $this->context->typedRefBridgeScopes[] = [];
+        $callee = $this->genTmpVarName();
+        $arguments = $this->genTmpVarName();
+        $named = $this->genTmpVarName();
+        $bridges = [];
+        $namedArgs = [];
+        $hasUnpack = false;
+        try {
+            foreach ($args as $index => $arg) {
+                if ($this->isPlaceholderExpr($arg)) {
+                    throw new PlaceHolder();
+                }
+                $this->validateTypedArrayDynamicArgument($arg, '', self::DYNAMIC_CALLED_CLASS, $index);
+                if ($arg->unpack) {
+                    if ($namedArgs !== []) {
+                        $this->fatalError($arg, 'Cannot use argument unpacking after named arguments');
+                    }
+                    $hasUnpack = true;
+                    $argumentAfterStart = count($this->context->afterStmtLines);
+                    $this->context->beforeStmtLines[] = $callee . '.appendUnpacked(' . $arguments . ', '
+                        . $named . ', ' . $this->parseArrayArg($arg) . ');';
+                    $this->finishResolvedMethodArgument($argumentAfterStart);
+                    continue;
+                }
+                if ($arg->name !== null) {
+                    $name = $arg->name->name;
+                    if (isset($namedArgs[$name])) {
+                        $this->fatalError($arg, "Duplicate named argument `{$name}`");
+                    }
+                    $namedArgs[$name] = true;
+                    $selector = $this->getLiteralString($name);
+                    $append = $named . '.set(' . $selector . ', ';
+                    if ($hasUnpack) {
+                        $this->context->beforeStmtLines[] = 'if (' . $named . '.exists(' . $selector
+                            . ')) { php::throwError("Named parameter $%s overwrites previous argument", '
+                            . 'php::Str(' . $selector . ').toCString()); }';
+                    }
+                } else {
+                    if ($namedArgs !== []) {
+                        $this->fatalError($arg, 'Cannot use positional argument after named argument');
+                    }
+                    if ($hasUnpack) {
+                        $this->fatalError($arg, 'Cannot use positional argument after argument unpacking');
+                    }
+                    $selector = (string) $index;
+                    $append = $arguments . '.append(';
+                }
+
+                $explicitRef = $this->isReferenceWrapperCall($arg->value);
+                $value = $arg->value;
+                if ($explicitRef) {
+                    $value = $this->unwrapReferenceWrapperCall($value, $arg);
+                    $arg = clone $arg;
+                    $arg->value = $value;
+                }
+                $canReference = $this->isVarExpr($value)
+                    || $value instanceof Expr\ArrayDimFetch
+                    || $value instanceof Expr\PropertyFetch
+                    || $value instanceof Expr\StaticPropertyFetch
+                    || $this->resolveRefReturningCall($value) === true;
+
+                if ($canReference) {
+                    $this->context->beforeStmtLines[] = 'if ('
+                        . ($explicitRef ? 'true' : $callee . '.byReference(' . $selector . ')') . ') {';
+                    $argumentAfterStart = count($this->context->afterStmtLines);
+                    $reference = $this->parseResolvedMethodReferenceArgument($arg, $bridges);
+                    $this->context->beforeStmtLines[] = $append . $reference . ');';
+                    $this->finishResolvedMethodArgument($argumentAfterStart);
+                    $this->context->beforeStmtLines[] = '} else {';
+                }
+                // unwrap_ptr() takes a value snapshot even for a REF variable
+                // or a call returning a reference. Later arguments may mutate it.
+                $argumentAfterStart = count($this->context->afterStmtLines);
+                $valueExpr = $this->parseCallArgValue($arg);
+                $this->context->beforeStmtLines[] = $append . 'php::Var(php::Var(' . $valueExpr . ').unwrap_ptr()));';
+                $this->finishResolvedMethodArgument($argumentAfterStart);
+                if ($canReference) {
+                    $this->context->beforeStmtLines[] = '}';
+                }
+            }
+
+            $code = '[&]() -> php::Var {' . PHP_EOL;
+            $this->indentLevel++;
+            $scope = $scoped ? ', &' . $this->getCallableScopeExpr() : '';
+            $code .= $this->getIndent() . 'php::ResolvedMethodCall ' . $callee . '(' . $object . ', ' . $method . $scope . ');' . PHP_EOL;
+            foreach ($bridges as [$bridge, $name, $type]) {
+                $code .= $this->getIndent() . 'std::optional<php::RefWrap<' . $type . '>> ' . $bridge . ';' . PHP_EOL;
+            }
+            $code .= $this->getIndent() . 'php::Args ' . $arguments . ';' . PHP_EOL;
+            $code .= $this->getIndent() . 'php::Array ' . $named . ';' . PHP_EOL;
+            $code .= $this->formatCapturedStmtLines($this->context->beforeStmtLines);
+            $result = $this->genTmpVarName();
+            $code .= $this->getIndent() . 'php::Var ' . $result . ' = ' . $callee . '.call(' . $arguments . ', ' . $named . '.array());' . PHP_EOL;
+            $code .= $this->getIndent() . $arguments . '.clear();' . PHP_EOL;
+            $code .= $this->getIndent() . $named . '.unset();' . PHP_EOL;
+            $code .= $this->formatCapturedStmtLines($this->context->afterStmtLines);
+            foreach ($bridges as [$bridge]) {
+                $code .= $this->getIndent() . 'if (' . $bridge . ') { ' . $bridge . '->commit(); }' . PHP_EOL;
+            }
+            $code .= $this->getIndent() . 'return ' . $result . ';' . PHP_EOL;
+            $this->indentLevel--;
+            return $code . $this->getIndent() . '}()';
+        } finally {
+            $this->context->beforeStmtLines = $before;
+            $this->context->afterStmtLines = $after;
+            array_pop($this->context->typedRefBridgeScopes);
+        }
+    }
+
+    /** Prepare only reference-capable storage; keep legal value calls legal. */
+    private function parseResolvedMethodReferenceArgument(Node\Arg $arg, array &$bridges): string
+    {
+        $rootExpr = $arg->value;
+        while ($rootExpr instanceof Expr\ArrayDimFetch) {
+            $rootExpr = $rootExpr->var;
+        }
+        if ($this->getTypedArrayDefinition($rootExpr) !== null
+            || ($this->isVarExpr($rootExpr) && $this->isStdContainer($this->parseIdentifier($rootExpr)))
+        ) {
+            return $this->unsupportedResolvedMethodReference();
+        }
+        if ($this->isVarExpr($arg->value) && $this->hasVar($this->parseIdentifier($arg->value))) {
+            $name = $this->parseIdentifier($arg->value);
+            $valueType = Type::getReferencedType($this->getRawVarType($name));
+            if (Type::getReferenceType($valueType) !== null) {
+                $root = $this->context->typedRefRoots[$name] ?? $name;
+                if (!isset($bridges[$root])) {
+                    $bridges[$root] = [$this->genTmpVarName(), $name, $valueType];
+                }
+                $bridge = $bridges[$root][0];
+                // Construct at the first actual by-ref argument, after any
+                // preceding by-value arguments have finished their effects.
+                $this->context->beforeStmtLines[] = 'if (!' . $bridge . ') { ' . $bridge . '.emplace(' . $name . '); }';
+                return '&' . $bridge . '->ref()';
+            }
+            if ($valueType !== Type::VAR && $valueType !== Type::REF) {
+                return $this->unsupportedResolvedMethodReference();
+            }
+        }
+        return $this->parseReferenceCallArgValue($arg);
+    }
+
+    private function unsupportedResolvedMethodReference(): string
+    {
+        return '[&]() -> php::Var { php::throwError("Cannot pass fixed or checked storage by reference to a dynamic method"); return {}; }()';
+    }
+
+    /** Keep argument-local cleanup inside the selected runtime branch. */
+    private function finishResolvedMethodArgument(int $afterStmtStart): void
+    {
+        foreach (array_slice($this->context->afterStmtLines, $afterStmtStart) as $statement) {
+            $this->context->beforeStmtLines[] = $statement;
+        }
+        $this->context->afterStmtLines = array_slice($this->context->afterStmtLines, 0, $afterStmtStart);
+    }
+
     private function isExistingReferenceCallArg(Node\Arg $arg): bool
     {
         if (!$this->isVarExpr($arg->value)) {
