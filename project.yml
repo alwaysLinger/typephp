@@ -5,6 +5,23 @@ cxx-std: c++17
 cxx-flags:
   - -Wall
 
+# Required PHP modules for tpc and its production Composer runtime.
+# phpy remains optional and is checked only when Python features are used.
+ext-deps:
+  - Core
+  - Reflection
+  - SPL
+  - ctype
+  - date
+  - filter
+  - hash
+  - json
+  - mbstring
+  - pcre
+  - random
+  - standard
+  - tokenizer
+
 # Windows 资源文件配置（图标、版本信息等）
 # 仅在 Windows 平台编译 bin 模式时生效
 resource:
