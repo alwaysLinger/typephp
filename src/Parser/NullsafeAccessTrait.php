@@ -107,17 +107,6 @@ trait NullsafeAccessTrait
                     : '';
                 $receiverClass = $this->detectClassOfExpr($item[4]->var);
                 $requiresDynamicScope = $this->runtimeMethodRequiresDynamicScope($receiverClass, $methodName);
-                if ($methodName === '' && $item[2] !== []) {
-                    $call = $this->parseResolvedMethodCall(
-                        $object,
-                        $item[1],
-                        $item[2],
-                        $requiresDynamicScope && $this->methodDef,
-                    );
-                    $code .= $this->getIndent() . "{$tmpVar} = {$call};" . PHP_EOL;
-                    $object = $tmpVar;
-                    continue;
-                }
                 $beforeStmtCount = count($this->context->beforeStmtLines);
                 $afterStmtCount = count($this->context->afterStmtLines);
                 $args = $this->parseCallArgs($item[2]);

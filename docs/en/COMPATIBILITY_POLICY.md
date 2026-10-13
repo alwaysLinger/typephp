@@ -28,6 +28,10 @@ classified as Partial, an Intentional Rule, or a Hard Limit.
 - A new PHPX API must describe a general operation, fit the existing naming and
   ownership model, and remain useful outside one PHPT reproducer.
 - Emit a native fast path only when the compiler can prove it is safe.
+- Infer reference arguments only from parameter declarations accurately resolved
+  at compile time. All other calls require explicit `std::ref()` (or equivalent
+  `toRef()`). Runtime inference is outside the language design and must not be
+  pursued as a compatibility bug or reopened without an explicit user decision.
 - Prefer a clear TypePHP-specific rule or diagnostic over a large dynamic
   compatibility layer.
 - A statically known invalid operation should fail during compilation. A

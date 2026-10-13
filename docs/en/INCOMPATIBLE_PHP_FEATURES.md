@@ -97,10 +97,10 @@ incompatible with or more restrictive than standard PHP.
   use the generated Closure arginfo automatically.
 - Reference assignment cannot create a reference from a complex static-property
   expression.
-- Calls whose argument signature cannot be determined at compile time — dynamic
-  calls, closure calls, and the like — cannot convert reference parameters
-  automatically; `std::ref()` or the equivalent keyword method `toRef()` must be
-  used explicitly.
+- Calls whose argument signature cannot be determined at compile time require
+  explicit `std::ref()` or the equivalent keyword method `toRef()`. Variable
+  method names, including nullsafe calls, follow the same rule. This is a settled
+  language design constraint; runtime reference inference is not planned.
 - `std::ref()` / `toRef()` only accept variables, array elements, or object
   properties.
 - Fixed `int`, `float`, `bool`, `string`, and `array` locals support a restricted
