@@ -5,6 +5,8 @@
 #define TYPEPHP_LIB_DEMO_API __declspec(dllexport)
 #elif defined(_WIN32)
 #define TYPEPHP_LIB_DEMO_API __declspec(dllimport)
+#elif defined(__GNUC__)
+#define TYPEPHP_LIB_DEMO_API __attribute__((visibility("default")))
 #else
 #define TYPEPHP_LIB_DEMO_API
 #endif

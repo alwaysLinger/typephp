@@ -309,7 +309,7 @@ trait NativeBuildConfigurationTrait
             // Unix PHP extensions resolve Zend/PHP symbols from the host SAPI.
             // Linking libphp.so here would load a second ZendVM and give PHPX a
             // different set of compiler/executor globals from the host process.
-            if (!$this->isBuildModeExt()) {
+            if (!$this->isBuildModeExt() && (!$this->isBuildModeLib() || $this->libraryEmbedsPhp)) {
                 $libraries[] = 'php';
             }
             $libraries[] = 'gmp';

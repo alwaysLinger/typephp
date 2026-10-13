@@ -2150,8 +2150,9 @@ YAML);
                 $mode,
             );
             $this->assertMatchesRegularExpression(
-                '/PHP_RSHUTDOWN_FUNCTION\([^)]*\)\s*\{\s*'
+                '/PHP_RSHUTDOWN_FUNCTION\([^)]*\)\s*\{.*?'
                     . 'php::request_shutdown\(\);\s*'
+                    . 'module_clean\(\);\s*'
                     . 'delete php_request_cache;\s*'
                     . 'php_request_cache = nullptr;/s',
                 $extension,
@@ -2174,6 +2175,40 @@ YAML);
                 $this->assertStringNotContainsString('php_embed_get_module', $extension, $mode);
             }
         }
+    }
+
+    public function testImportedLibrariesHaveBalancedRequestLifecycleHooks(): void
+    {
+        global $translator;
+        $translator = $this->compiler;
+        $this->compiler->setBuildMode(CompilerBase::BUILD_MODE_EXT);
+        $this->setPropertyValue('externalImportStubFiles', [
+            $this->testDir . '/beta.stub.php' => true,
+            $this->testDir . '/alpha.stub.php' => true,
+        ]);
+
+        $extension = file_get_contents($this->compiler->genExtension());
+
+        $this->assertStringContainsString(
+            'extern "C" TYPEPHP_SYMBOL_IMPORT zend_result typephp_alpha_library_request_startup();',
+            $extension,
+        );
+        $this->assertStringContainsString(
+            'if (typephp_beta_library_request_startup() != SUCCESS) {',
+            $extension,
+        );
+        $this->assertMatchesRegularExpression(
+            '/if \(typephp_beta_library_request_startup\(\) != SUCCESS\) \{\s*'
+                . 'php::request_shutdown\(\);\s*'
+                . 'typephp_alpha_library_request_shutdown\(\);\s*delete php_request_cache;/s',
+            $extension,
+        );
+        $this->assertMatchesRegularExpression(
+            '/PHP_RSHUTDOWN_FUNCTION.*?module_clean\(\);\s*'
+                . 'typephp_beta_library_request_shutdown\(\);\s*'
+                . 'typephp_alpha_library_request_shutdown\(\);\s*delete php_request_cache;/s',
+            $extension,
+        );
     }
 
     public function testFunctionPointerCacheRejectsClassMethodNames(): void

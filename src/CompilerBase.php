@@ -567,6 +567,8 @@ abstract class CompilerBase implements PropertyAccessContext
     protected array $sapiTargets = ['embed'];
 
     protected bool $sapiConfigured = false;
+    /** Whether a library's native entry points require their own Embed runtime. */
+    protected bool $libraryEmbedsPhp = true;
 
     protected bool $phpBuilderZts = PHP_ZTS;
     protected bool $phpBuilderDebug = PHP_DEBUG;
@@ -686,13 +688,13 @@ abstract class CompilerBase implements PropertyAccessContext
     /** @var array<string, string> Lowercase class name => declared Native class name. */
     protected array $nativeClassDeclarations = [];
 
-    /** @var array<string, true> Request-reset initialization flags for Native static locals. */
+    /** @var array<string, true> Request-reset initialization flags for static locals. */
     protected array $nativeStaticInitializers = [];
 
-    /** @var array<string, array<string, true>> PHP source => Native static initialization flags. */
+    /** @var array<string, array<string, true>> PHP source => static initialization flags. */
     protected array $nativeStaticInitializersInFile = [];
 
-    /** @var array<string, string> Native static initialization flag => owning PHP file. */
+    /** @var array<string, string> Static initialization flag => owning PHP file. */
     protected array $nativeStaticInitializerDeclInFile = [];
 
     /** Box inferred integer locals in php::Var to retain Zend integer widening semantics. */
@@ -4820,18 +4822,12 @@ abstract class CompilerBase implements PropertyAccessContext
 
             $list[] = 'auto &' . $varName . ' = ' . $this->escapeGlobalVar($globalVar) . ';';
             if ($var->default) {
-                $initState = self::STATIC_VAR . $varName . '_initialized';
-                if (isset($this->nativeGlobalObjects[$globalVar])) {
-                    $flag = $globalVar . '__initialized';
-                    $this->nativeStaticInitializers[$flag] = true;
-                    $this->nativeStaticInitializersInFile[$this->file][$flag] = true;
-                    $this->nativeStaticInitializerDeclInFile[$flag] = $this->file;
-                    $initState = $this->escapeGlobalVar($flag);
-                    $initCode = '';
-                } else {
-                    $initCode = $this->getIndent() . 'static THREAD_LOCAL bool ' . $initState . ' = false;';
-                }
-                $initCode .= $this->getIndent() . "if (!{$initState}) { \n";
+                $flag = $globalVar . '__initialized';
+                $this->nativeStaticInitializers[$flag] = true;
+                $this->nativeStaticInitializersInFile[$this->file][$flag] = true;
+                $this->nativeStaticInitializerDeclInFile[$flag] = $this->file;
+                $initState = $this->escapeGlobalVar($flag);
+                $initCode = $this->getIndent() . "if (!{$initState}) { \n";
                 $this->indentLevel++;
                 $initCode .= $this->getIndent() . "{$initState} = true;\n";
                 $initCode .= $this->genStaticVarInitLambda($var, $varName);

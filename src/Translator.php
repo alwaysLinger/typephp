@@ -1322,6 +1322,12 @@ class Translator extends Preprocessor
         // callbacks. Generate these before sizing caches/rendering literals:
         // parameter validation may allocate additional stable cache IDs.
         $stubWrapperCode = $this->genStubWrappers();
+        $importLibraries = [];
+        foreach (array_keys($this->externalImportStubFiles) as $stubFile) {
+            $importLibraries[$this->getExternalImportLibraryName($stubFile)] = true;
+        }
+        $importLibraries = array_keys($importLibraries);
+        sort($importLibraries, SORT_STRING);
         // genExtension() is also a public code-generation entry used directly
         // by tooling and tests, outside SourcePipelineTrait::convert(). Keep the
         // whole-program property-default invariant local to the consumer too.
@@ -1372,6 +1378,12 @@ class Translator extends Preprocessor
         }
 
         $projectNamespace = $this->getProjectNamespace();
+        foreach ($importLibraries as $library) {
+            $code .= 'extern "C" TYPEPHP_SYMBOL_IMPORT zend_result typephp_' . $library
+                . '_library_request_startup();' . PHP_EOL;
+            $code .= 'extern "C" TYPEPHP_SYMBOL_IMPORT void typephp_' . $library
+                . '_library_request_shutdown();' . PHP_EOL;
+        }
         $code .= 'namespace ' . $projectNamespace . ' {' . PHP_EOL . PHP_EOL;
 
         $code .= "// global vars \n";
@@ -1421,6 +1433,11 @@ class Translator extends Preprocessor
             . max(1, $this->getStableIdRegistry()->capacity('function-resolution')) . ']{};' . PHP_EOL;
         $code .= '};' . PHP_EOL;
         $code .= 'static THREAD_LOCAL php_request_cache_storage *php_request_cache = nullptr;' . PHP_EOL;
+        if ($this->isBuildModeLib()) {
+            // A dependency can be shared by several consumers (including a
+            // diamond of libraries). Its request state has one owner per edge.
+            $code .= 'static THREAD_LOCAL uint32_t php_request_users = 0;' . PHP_EOL;
+        }
 
         $code .= "// class entry \n";
         // Internal/compiled symbols have module lifetime. They are initialized
@@ -1845,10 +1862,14 @@ CODE;
         // rinit begin
         $code .= 'PHP_RINIT_FUNCTION(' . $moduleName . ') {' . PHP_EOL;
         $code .= 'if (UNEXPECTED(php_request_cache != nullptr)) {' . PHP_EOL;
-        $code .= $this->getIndent() . ($this->nanoMode
-            ? 'zend_error(E_WARNING, "TypePHP request cache is already initialized");'
-            : 'php_error_docref(nullptr, E_WARNING, "TypePHP request cache is already initialized");') . PHP_EOL;
-        $code .= $this->getIndent() . 'return FAILURE;' . PHP_EOL;
+        if ($this->isBuildModeLib()) {
+            $code .= '++php_request_users;' . PHP_EOL . 'return SUCCESS;' . PHP_EOL;
+        } else {
+            $code .= $this->getIndent() . ($this->nanoMode
+                ? 'zend_error(E_WARNING, "TypePHP request cache is already initialized");'
+                : 'php_error_docref(nullptr, E_WARNING, "TypePHP request cache is already initialized");') . PHP_EOL;
+            $code .= $this->getIndent() . 'return FAILURE;' . PHP_EOL;
+        }
         $code .= '}' . PHP_EOL;
         $code .= 'php_request_cache = new (std::nothrow) php_request_cache_storage{};' . PHP_EOL;
         $code .= 'if (UNEXPECTED(php_request_cache == nullptr)) {' . PHP_EOL;
@@ -1857,7 +1878,22 @@ CODE;
             : 'php_error_docref(nullptr, E_WARNING, "Unable to allocate TypePHP request cache");') . PHP_EOL;
         $code .= $this->getIndent() . 'return FAILURE;' . PHP_EOL;
         $code .= '}' . PHP_EOL;
+        if ($this->isBuildModeLib()) {
+            $code .= 'php_request_users = 1;' . PHP_EOL;
+        }
         $code .= 'php::request_init();' . PHP_EOL;
+        foreach ($importLibraries as $index => $library) {
+            $code .= 'if (typephp_' . $library . '_library_request_startup() != SUCCESS) {' . PHP_EOL;
+            $code .= 'php::request_shutdown();' . PHP_EOL;
+            foreach (array_reverse(array_slice($importLibraries, 0, $index)) as $initializedLibrary) {
+                $code .= 'typephp_' . $initializedLibrary . '_library_request_shutdown();' . PHP_EOL;
+            }
+            $code .= 'delete php_request_cache;' . PHP_EOL . 'php_request_cache = nullptr;' . PHP_EOL;
+            if ($this->isBuildModeLib()) {
+                $code .= 'php_request_users = 0;' . PHP_EOL;
+            }
+            $code .= 'return FAILURE;' . PHP_EOL . '}' . PHP_EOL;
+        }
         $code .= 'module_init();' . PHP_EOL;
 
         if ($this->isBuildModeBin() && $this->hasSapi('embed') && !$this->isNanoMode()) {
@@ -1900,13 +1936,33 @@ CODE;
         $code .= '}' . PHP_EOL . PHP_EOL;
         // rinit end
 
-        $code .= <<<CODE
-PHP_RSHUTDOWN_FUNCTION({$moduleName}) {
-    php::request_shutdown();
-    delete php_request_cache;
-    php_request_cache = nullptr;
-    module_clean();
-CODE;
+        $code .= 'PHP_RSHUTDOWN_FUNCTION(' . $moduleName . ') {' . PHP_EOL;
+        if ($this->isBuildModeLib()) {
+            $code .= 'if (php_request_users == 0 || --php_request_users != 0) {' . PHP_EOL;
+            $code .= 'return SUCCESS;' . PHP_EOL . '}' . PHP_EOL;
+        } else {
+            // RINIT can fail after rolling back its imported libraries. Zend
+            // may still enter RSHUTDOWN; do not release those owners twice.
+            $code .= 'if (php_request_cache == nullptr) {' . PHP_EOL;
+            $code .= 'return SUCCESS;' . PHP_EOL . '}' . PHP_EOL;
+        }
+        $code .= 'php::request_shutdown();' . PHP_EOL;
+        // Cleanup can run user destructors that still need this module's
+        // caches and imported libraries. Release the dependencies afterwards.
+        $code .= 'module_clean();' . PHP_EOL;
+        foreach (array_reverse($importLibraries) as $library) {
+            $code .= 'typephp_' . $library . '_library_request_shutdown();' . PHP_EOL;
+        }
+        $code .= 'delete php_request_cache;' . PHP_EOL . 'php_request_cache = nullptr;' . PHP_EOL;
+        if ($this->isBuildModeLib()) {
+            // The library's own MSHUTDOWN does not run when its symbols were
+            // registered by a consumer. Drop pointers before that consumer
+            // can unload or restart its embedded PHP runtime.
+            foreach ([self::PERSISTENT_CLASS_MAP, self::PERSISTENT_FUNC_MAP, self::PERSISTENT_PROP_MAP] as $map) {
+                $code .= 'for (auto &slot : ' . self::PREFIX . $map . ') {' . PHP_EOL;
+                $code .= 'php::resetPersistentCache(slot);' . PHP_EOL . '}' . PHP_EOL;
+            }
+        }
         if ($this->isSapiBuild()) {
             $code .= '    typephp_opcode_table_request_shutdown();' . PHP_EOL;
         }
@@ -2008,6 +2064,17 @@ CODE;
             }
         } else {
             $code .= '}  // namespace ' . $projectNamespace . PHP_EOL;
+        }
+
+        if ($this->isBuildModeLib()) {
+            $code .= 'extern "C" TYPEPHP_SYMBOL_EXPORT zend_result typephp_' . $this->targetName
+                . '_library_request_startup() {' . PHP_EOL;
+            $code .= 'return ' . $projectNamespace . '::PHP_RINIT(' . $moduleName . ')(MODULE_PERSISTENT, 0);'
+                . PHP_EOL . '}' . PHP_EOL;
+            $code .= 'extern "C" TYPEPHP_SYMBOL_EXPORT void typephp_' . $this->targetName
+                . '_library_request_shutdown() {' . PHP_EOL;
+            $code .= $projectNamespace . '::PHP_RSHUTDOWN(' . $moduleName . ')(MODULE_PERSISTENT, 0);'
+                . PHP_EOL . '}' . PHP_EOL;
         }
 
         $this->indentLevel--;
@@ -2884,8 +2951,72 @@ CODE;
         }
     }
 
+    /** @param list<string> $objectFiles @return list<string> */
+    private function selectLibraryRuntimeObjects(array $objectFiles): array
+    {
+        $runtimeObjects = [];
+        foreach (['typephp_runtime.cc', 'typephp_main.cc'] as $source) {
+            $file = $this->getPhpxDir() . '/src/misc/' . $source;
+            if (is_file($file)) {
+                $runtimeObjects[] = $this->getObjectFile($file);
+            }
+        }
+        $projectObjects = array_values(array_diff($objectFiles, $runtimeObjects));
+        $inspectors = [];
+        foreach (['nm', 'llvm-nm'] as $tool) {
+            $path = \TypePhp\Build\ExecutableLocator::resolve($tool);
+            if ($path !== null) {
+                $inspectors[$path] = true;
+            }
+        }
+        if ($inspectors === []) {
+            $this->error('Library builds require nm or llvm-nm to inspect native runtime entry points');
+        }
+        $symbols = '';
+        $status = 1;
+        foreach (array_keys($inspectors) as $nm) {
+            $process = proc_open([$nm, '-u', ...$projectObjects], [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['redirect', 1],
+            ], $pipes);
+            if (!is_resource($process)) {
+                continue;
+            }
+            fclose($pipes[0]);
+            $symbols = stream_get_contents($pipes[1]);
+            fclose($pipes[1]);
+            $status = proc_close($process);
+            if ($status === 0) {
+                break;
+            }
+            // GNU nm may not understand LLVM LTO objects. Retry with LLVM's
+            // inspector before rejecting an otherwise supported Clang build.
+        }
+        if ($status !== 0) {
+            $this->error('Unable to inspect library runtime entry points: ' . $symbols);
+        }
+        // Inspect real object symbols, not source text. C/C++ adapters that
+        // explicitly start PHP keep the standalone Embed entry and libphp.
+        // Ordinary libraries inherit PHP from their bin/ext consumer; loading
+        // libphp into a PHP extension can bind to a second, unstarted ZendVM.
+        $this->libraryEmbedsPhp = preg_match(
+            '/(?:^|\\s)_?(?:typephp_' . preg_quote($this->targetName, '/')
+                . '_runtime_(?:init|shutdown)|typephp_runtime_(?:start|stop))\\s*$/m',
+            $symbols,
+        ) === 1;
+        return $this->libraryEmbedsPhp ? $objectFiles : $projectObjects;
+    }
+
     public function build(array $objectFiles): string
     {
+        if ($this->isBuildModeLib() && !$this->isNanoMode()
+            && ($this->isLinux() || $this->isMacos())
+            && !$this->isAndroidTarget() && !$this->isIosTarget() && !$this->isWasiTarget()
+            && !$this->fullStatic && !$this->isPhpBuilderBuild()
+        ) {
+            $objectFiles = $this->selectLibraryRuntimeObjects($objectFiles);
+        }
         if ($this->isPhpBuilderBuild()) {
             if ($this->sapiPhpSourceDirectory === null
                 || $this->sapiPhpBuildDirectory === null

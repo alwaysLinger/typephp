@@ -1083,7 +1083,7 @@ abstract class Preprocessor extends CompilerBase
         return ltrim($resolvedName->toString(), '\\');
     }
 
-    private function getExternalImportLibraryName(string $stubFile): string
+    protected function getExternalImportLibraryName(string $stubFile): string
     {
         $name = basename($stubFile, '.stub.php');
         $name = str_replace(['-', '*'], '_', $name);

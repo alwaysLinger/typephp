@@ -77,6 +77,11 @@ class Windows extends PlatformBase
 
         $flags = [];
         foreach ($libraries as $lib) {
+            // link.exe treats an extensionless positional input as an .obj.
+            // Library imports and YAML link-libs use logical library names.
+            if (pathinfo(str_replace('\\', '/', $lib), PATHINFO_EXTENSION) === '') {
+                $lib .= '.lib';
+            }
             $flags[] = '"' . $lib . '"';
         }
 
@@ -216,7 +221,21 @@ class Windows extends PlatformBase
         }
 
         $phpxDllPath = $phpxDir . '\build\phpx.dll';
-        if ($checkPhpxRuntime && !is_file($phpxDllPath)) {
+        $phpxDllCandidates = [
+            $phpxDllPath,
+            $phpxDir . '\bin\phpx.dll',
+            $phpxDir . '\phpx.dll',
+            $phpDir . '\phpx.dll',
+            dirname(str_replace('\\', '/', $phpxDir)) . '\phpx.dll',
+        ];
+        $foundRuntime = false;
+        foreach ($phpxDllCandidates as $candidate) {
+            if (is_file($candidate)) {
+                $foundRuntime = true;
+                break;
+            }
+        }
+        if ($checkPhpxRuntime && !$foundRuntime) {
             $warnings[] = [
                 'error' => 'The PHPX runtime library was not found at: ' . $phpxDllPath,
                 'info' => 'Build PHPX first (for example, run `nmake phpx` in ' . $phpxDir . '\build)',

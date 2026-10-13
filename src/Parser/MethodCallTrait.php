@@ -281,7 +281,7 @@ trait MethodCallTrait
         }
 
         // Case 4: Typed object whose class has no known subclasses
-        if ($object !== 'this_' && $this->hasClass($class)) {
+        if ($object !== 'this_' && $this->hasClass($class) && !$this->isBuildModeLib()) {
             $classLower = strtolower($class);
             if (!$this->hasSubClasses($classLower) && !$this->isInterface($class) && !$this->isAbstractClass($class)) {
                 return true;
@@ -326,8 +326,9 @@ trait MethodCallTrait
 
         $fullMethodName = $this->getOverrideMethodName($class, $method);
 
-        // A subclass declares a method with the same name, so try to devirtualize
-        if ($this->isOverrideMethod($fullMethodName)) {
+        // Libraries may be extended by consumers outside this compilation.
+        // final/private methods and proven exact classes remain direct calls.
+        if ($this->isOverrideMethod($fullMethodName) || $this->isBuildModeLib()) {
             if (!$this->canDevirtualize($object, $class, $method)) {
                 return false;
             }

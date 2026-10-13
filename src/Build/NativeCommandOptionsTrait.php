@@ -209,7 +209,12 @@ trait NativeCommandOptionsTrait
             'post_ldflags' => $postLdflags,
             'debug' => $this->debug,
             'no_console' => $this->noConsole,
-            'build_mode' => $this->buildMode,
+            // A shared-runtime library resolves Zend symbols from its
+            // consumer, just like a PHP extension. Keep library export and
+            // compile options unchanged.
+            'build_mode' => $this->isBuildModeLib() && !$this->libraryEmbedsPhp
+                ? self::BUILD_MODE_EXT
+                : $this->buildMode,
             'sanitize' => $this->sanitize,
             'lto' => $this->enableLto,
             'section_gc' => $this->isNanoMode(),

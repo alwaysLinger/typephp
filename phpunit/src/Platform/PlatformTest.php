@@ -182,11 +182,53 @@ class PlatformTest extends TestCase
     {
         $platform = new Windows();
         
-        $libs = ['php8embed.lib', 'php8ts.lib'];
+        $libs = ['php8embed.lib', 'php8ts.lib', 'repro', 'UPPER.LIB', 'C:\my libs\custom.lib', 'objects.obj'];
         $flags = $platform->getLibraryFlags($libs);
         
         $this->assertStringContainsString('"php8embed.lib"', $flags);
         $this->assertStringContainsString('"php8ts.lib"', $flags);
+        $this->assertStringContainsString('"repro.lib"', $flags);
+        $this->assertStringNotContainsString('"repro"', $flags);
+        $this->assertStringContainsString('"UPPER.LIB"', $flags);
+        $this->assertStringContainsString('"C:\my libs\custom.lib"', $flags);
+        $this->assertStringContainsString('"objects.obj"', $flags);
+    }
+
+    public function testWindowsPhpxRuntimeSupportsBuildInstallAndReleaseLayouts(): void
+    {
+        $root = sys_get_temp_dir() . '/typephp-phpx-layout-' . bin2hex(random_bytes(6));
+        $package = $root . '/package';
+        $phpx = $package . '/phpx';
+        mkdir($phpx, 0777, true);
+        try {
+            foreach ([
+                $phpx . '\build\phpx.dll',
+                $phpx . '\bin\phpx.dll',
+                $phpx . '\phpx.dll',
+                $package . '\phpx.dll',
+            ] as $runtime) {
+                // On Unix the Windows separators are literal filename
+                // characters; on Windows create the actual parent directories.
+                if (!is_dir(dirname($runtime))) {
+                    mkdir(dirname($runtime), 0777, true);
+                }
+                file_put_contents($runtime, 'runtime');
+                $diagnostics = (new Windows())->getBuildLibraryWarnings($package, $phpx, 'bin');
+                foreach ($diagnostics as $diagnostic) {
+                    $this->assertStringNotContainsString('PHPX runtime library', $diagnostic['error'] ?? '');
+                }
+                unlink($runtime);
+            }
+        } finally {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST,
+            );
+            foreach ($iterator as $entry) {
+                $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+            }
+            rmdir($root);
+        }
     }
 
     public function testWindowsMissingPhpxLibrariesAreFatalDiagnostics(): void
