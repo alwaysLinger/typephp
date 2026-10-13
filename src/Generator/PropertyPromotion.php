@@ -24,7 +24,11 @@ trait PropertyPromotion
             return 'this_.' . $this->getNativeObjectPropertyCppName($property, $this->classDef)
                 . ' = ' . $value . ';' . PHP_EOL;
         }
-        $code .= 'this_.setProperty(' . $this->genCharPtr($propertyName) . ', ' . $argInfo->name . ')';
+        $scope = $this->class !== ''
+            ? $this->getClassEntryPtr($this->getFullClassName())
+            : 'nullptr';
+        $code .= 'typephp_write_property_scoped(this_, '
+            . $this->genCharPtr($propertyName) . ', ' . $argInfo->name . ', ' . $scope . ')';
         $code .= ";\n";
         return $code;
     }
