@@ -30,11 +30,11 @@ jobs:
       - name: Checkout TypePHP
         uses: actions/checkout@v4
 
-      - name: Checkout PHPX v2.9.3
+      - name: Checkout PHPX master
         uses: actions/checkout@v4
         with:
           repository: swoole/phpx
-          ref: v2.9.3
+          ref: master
           path: third_party/phpx
 
       - name: Setup PHP

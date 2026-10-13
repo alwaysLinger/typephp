@@ -356,9 +356,13 @@ trait SelectionExpressionTrait
             $code .= '}';
             $this->context->beforeStmtLines[] = $code;
         } else {
+            // This path materializes a Variant result. Both operands must
+            // have that C++ type: Variant and const String (empty_string)
+            // otherwise admit conversions in both directions for ?:.
             $this->context->beforeStmtLines[] = $comment .
-                $tmpVar . ' = ' . $condExpr . ' ? ' . $leftExpr . ' : ' . $rightExpr . ';';
+                $tmpVar . ' = ' . $condExpr . ' ? php::Var(' . $leftExpr . ') : php::Var(' . $rightExpr . ');';
         }
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::VAR);
         $this->context->materializedExpressions->offsetSet($expr, $tmpVar);
 
         return $tmpVar;
