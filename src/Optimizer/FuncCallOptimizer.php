@@ -514,6 +514,13 @@ trait FuncCallOptimizer
             }
         }
 
+        if ($name === 'implode' && count($expr->args) === 1) {
+            if ($this->detectTypeOfExpr($expr->args[0]->value) === Type::ARRAY) {
+                return $target . '("", ' . $this->resolveArg($expr, 0, self::ARG_TYPE_ARRAY) . ')';
+            }
+            return $this->genRuntimeFunctionCall($this->getFuncPtr($name), $expr->args, $name);
+        }
+
         $args = $this->buildArgList($expr, $argTypeStr, $defaults, $nullables);
         return $target . '(' . implode(', ', $args) . ')';
     }
