@@ -1937,7 +1937,9 @@ CODE;
             $code .= '}' . PHP_EOL;
         }
 
-        $extensionDependencies = $this->resolveExtensionDependencies();
+        // Runtime requirements are declared explicitly in project YAML. Source
+        // analysis is used separately to select php-builder extension sources.
+        $extensionDependencies = $this->extensionDependencies;
         if ($extensionDependencies === []) {
             $moduleHeader = '    STANDARD_MODULE_HEADER,';
         } else {
@@ -2018,14 +2020,13 @@ CODE;
     }
 
     /**
-     * Require every PHP extension that owns an internal function or class
-     * referenced by compiled sources. The compiler host supplies the ownership
-     * metadata via Reflection; Zend validates the resulting dependency list
-     * when the generated TypePHP module starts on the target host.
+     * Select PHP extension sources for php-builder from explicit dependencies
+     * and internal symbols referenced by compiled sources. These inferred
+     * extensions do not become Zend module registration dependencies.
      *
      * @return list<string>
      */
-    private function resolveExtensionDependencies(): array
+    private function resolvePhpBuilderExtensions(): array
     {
         $dependencies = $this->extensionDependencies;
         $seen = [];

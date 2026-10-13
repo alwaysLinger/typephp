@@ -12,6 +12,7 @@ use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use TypePhp\Build\CompilerRuntime;
 use TypePhp\Build\PhpBuilderConfiguration;
+use TypePhp\Build\SapiExtensionRequirements;
 use TypePhp\CompilerBase;
 use TypePhp\CompilerTest;
 use TypePhp\Exception\TestError;
@@ -861,7 +862,7 @@ YAML);
         );
     }
 
-    public function testInternalSymbolExtensionsAreDetectedAsModuleDependencies(): void
+    public function testInternalSymbolExtensionsOnlyAffectPhpBuilderSourceSelection(): void
     {
         if (!extension_loaded('mbstring')) {
             $this->markTestSkipped('mbstring extension is not available');
@@ -900,11 +901,104 @@ PHP);
         $extension = file_get_contents($this->compiler->genExtension());
 
         $this->assertStringContainsString('php::toInt(php::call(', implode("\n", $generatedSources));
-        $this->assertSame(1, substr_count($extension, 'ZEND_MOD_REQUIRED("MBSTRING")'));
-        $this->assertStringContainsString('ZEND_MOD_REQUIRED("Core")', $extension);
-        $this->assertStringContainsString('ZEND_MOD_REQUIRED("date")', $extension);
-        $this->assertStringContainsString('ZEND_MOD_REQUIRED("Reflection")', $extension);
-        $this->assertStringNotContainsString('ZEND_MOD_REQUIRED("mbstring")', $extension);
+        $this->assertStringContainsString(
+            "static const zend_module_dep typephp_app_module_deps[] = {\n"
+            . "    ZEND_MOD_REQUIRED(\"MBSTRING\")\n"
+            . "    ZEND_MOD_END\n"
+            . '};',
+            $extension,
+        );
+        $this->assertSame(1, substr_count($extension, 'ZEND_MOD_REQUIRED('));
+
+        $sourceExtensions = $this->invokeMethod('resolvePhpBuilderExtensions');
+        $this->assertContains('MBSTRING', $sourceExtensions);
+        $this->assertContains('Core', $sourceExtensions);
+        $this->assertContains('date', $sourceExtensions);
+        $this->assertContains('Reflection', $sourceExtensions);
+        $this->assertNotContains('mbstring', $sourceExtensions);
+    }
+
+    public static function moduleDependencyBuildModes(): array
+    {
+        return [
+            'bin, absent ext-deps' => [CompilerBase::BUILD_MODE_BIN, false, ''],
+            'bin, empty ext-deps' => [CompilerBase::BUILD_MODE_BIN, false, 'ext-deps: []'],
+            'lib' => [CompilerBase::BUILD_MODE_LIB, false, ''],
+            'ext' => [CompilerBase::BUILD_MODE_EXT, false, ''],
+            'nano' => [CompilerBase::BUILD_MODE_BIN, true, ''],
+        ];
+    }
+
+    #[DataProvider('moduleDependencyBuildModes')]
+    public function testSourceAndComposerDoNotAddModuleDependencies(string $mode, bool $nano, string $dependencies): void
+    {
+        global $translator;
+        $translator = $this->compiler;
+        $this->compiler->setBuildMode($mode);
+        $this->setPropertyValue('nanoMode', $nano);
+        $projectFile = $this->createProjectFile(<<<YAML
+sources:
+  - main.php
+embedded-files:
+  - vendor
+{$dependencies}
+YAML);
+        mkdir(dirname($projectFile) . '/vendor');
+        file_put_contents(dirname($projectFile) . '/composer.json', json_encode([
+            'require' => ['ext-phpy' => '*', 'ext-curl' => '*'],
+        ]));
+        file_put_contents(dirname($projectFile) . '/vendor/autoload.php', '<?php return null;');
+        file_put_contents(dirname($projectFile) . '/main.php', <<<'PHP'
+<?php
+function main(): void
+{
+    strlen('typephp');
+    DateTimeInterface::ATOM;
+    new ReflectionClass(stdClass::class);
+}
+PHP);
+        $files = $this->invokeMethod('parseProjectYaml', $projectFile);
+        $this->compiler->addFiles($files);
+        foreach ($files as $file) {
+            $this->compiler->prepareFile($file);
+            $this->compiler->convertFile($file);
+        }
+
+        $extension = file_get_contents($this->compiler->genExtension());
+
+        $this->assertStringContainsString(
+            "zend_module_entry typephp_app_module_entry = {\n    STANDARD_MODULE_HEADER,",
+            $extension,
+        );
+        $this->assertStringNotContainsString('zend_module_dep ', $extension);
+        $this->assertStringNotContainsString('ZEND_MOD_REQUIRED(', $extension);
+        $this->assertSame([], $this->compiler->getExtensionDependencies());
+        $this->assertSame(
+            ['curl', 'phpy'],
+            SapiExtensionRequirements::fromEmbeddedVendorFiles(
+                $this->getPropertyValue('embeddedFiles'),
+            ),
+        );
+    }
+
+    public function testOptionalPhpyScannerDoesNotRequirePhpyAtModuleStartup(): void
+    {
+        if (!extension_loaded('phpy')) {
+            $this->markTestSkipped('phpy is needed to reproduce extension ownership detection');
+        }
+
+        global $translator;
+        $translator = $this->compiler;
+        $this->compiler->setBuildMode(CompilerBase::BUILD_MODE_EXT);
+        $file = dirname(__DIR__, 2) . '/src/PythonTools/IdeHelper/PhpyModuleScanner.php';
+        $this->compiler->addFiles([$file]);
+        $this->compiler->prepareFile($file);
+        $this->compiler->convertFile($file);
+
+        $extension = file_get_contents($this->compiler->genExtension());
+
+        $this->assertStringNotContainsString('zend_module_dep ', $extension);
+        $this->assertContains('phpy', $this->invokeMethod('resolvePhpBuilderExtensions'));
     }
 
     public function testParseProjectYamlSupportsCustomFilenameAndRelativeBuildDir(): void

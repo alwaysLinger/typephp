@@ -1020,7 +1020,7 @@ trait SourcePipelineTrait
                 // Function and class ownership is known only after lowering all
                 // project bodies. Upgrade the cached PHP runtime before code is
                 // compiled if those bodies introduced another extension.
-                $this->preparePhpBuilderEnvironment($this->resolveExtensionDependencies());
+                $this->preparePhpBuilderEnvironment($this->resolvePhpBuilderExtensions());
             }
             return $this->finalizeProjectConversion($conversion);
         } finally {
