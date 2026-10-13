@@ -4,6 +4,29 @@ use TypePhp\CompilerTest;
 
 final class FuncCallOptimizerTest extends BaseTest
 {
+    public function testSingleArgumentImplodeUsesTheSharedEmptyString(): void
+    {
+        global $translator;
+
+        foreach ([false, true] as $noLiteralStrings) {
+            foreach (['implode', 'join'] as $name) {
+                $compiler = CompilerTest::create(TYPEPHP_ROOT_PATH);
+                $translator = $compiler;
+                (new ReflectionProperty($compiler, 'context'))->setValue($compiler, new TypePhp\Context\FunctionContext());
+                (new ReflectionProperty($compiler, 'noLiteralStrings'))->setValue($compiler, $noLiteralStrings);
+                $expr = new PhpParser\Node\Expr\FuncCall(
+                    new PhpParser\Node\Name($name),
+                    [new PhpParser\Node\Arg(new PhpParser\Node\Expr\Array_())],
+                );
+                $code = (new ReflectionMethod($compiler, 'parseFuncCallWithOptimizer'))
+                    ->invoke($compiler, $name, $expr);
+
+                self::assertIsString($code);
+                self::assertStringStartsWith('php::fn::implode(php::empty_string, ', $code);
+            }
+        }
+    }
+
     public function testStrictTypedArgumentsUseOnlyProvenDirectAbiPaths(): void
     {
         global $translator;
