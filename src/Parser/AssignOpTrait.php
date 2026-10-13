@@ -54,10 +54,7 @@ trait AssignOpTrait
             }
             return '((' . $tmp . ' = ' . $value . ', ' . $target . ' = ' . $tmp . '), ' . $tmp . ')';
         }
-        $array              = $this->parseWritableIdentifier($left->var);
-        if (!$this->hasVar($array) and $this->isVarExpr($left->var)) {
-            $this->addLocalVar($array, Type::ARRAY);
-        }
+        $array = $this->parseWritableIdentifier($left->var);
 
         // item(dim, true) updates an existing reference's value, while offsetSet()
         // replaces the array bucket and breaks the reference. Keep offsetSet() for
@@ -347,6 +344,9 @@ trait AssignOpTrait
         }
         $this->assertNotNullsafeWriteContext($left);
         $this->assertNativeArrayAccessDirectWrite($left, true);
+        if ($left instanceof Expr\ArrayDimFetch) {
+            $this->declareArrayWriteRoot($left);
+        }
         if ($left instanceof Expr\ArrayDimFetch
             && $this->isNativeObjectClass($this->detectClassOfExpr($left->var))
         ) {
@@ -1695,6 +1695,9 @@ trait AssignOpTrait
     private function parseArrayDimWriteContainer(Expr $receiver): array
     {
         if ($receiver instanceof Expr\ArrayDimFetch) {
+            if ($this->isVarExpr($receiver->var) && $receiver->var->name === 'GLOBALS') {
+                return $this->parseExprWithCapturedStmts($receiver, writable: true);
+            }
             [$base, $before, $after] = $this->parseArrayDimWriteContainer($receiver->var);
             $container = $this->genTmpVarName();
             $before[] = 'auto&& ' . $container . ' = ' . $base . ';';
@@ -2035,6 +2038,10 @@ trait AssignOpTrait
         $this->assertNativeArrayAccessDirectWrite($expr->var, false);
         $this->checkLeftValue($expr->var);
 
+        if ($expr->var instanceof Expr\ArrayDimFetch) {
+            $this->declareArrayWriteRoot($expr->var);
+        }
+
         // Zend evaluates the target's receiver and array keys exactly once,
         // before the isset check and regardless of its outcome. The lowering
         // below mentions the target several times (isset, read, write), so
@@ -2233,7 +2240,15 @@ trait AssignOpTrait
         Expr\ArrayDimFetch $target,
         string $selectedValue,
     ): array {
-        if ($this->isVarExpr($target->var)) {
+        if ($target->var instanceof Expr\ArrayDimFetch
+            && $this->isVarExpr($target->var->var)
+            && $target->var->var->name === 'GLOBALS'
+        ) {
+            // GLOBALS is not a local C++ container. Start a nested probe at
+            // its resolved slot, just like the corresponding write path.
+            $container = $this->parseGlobalsArrayDimFetch($target->var);
+            $containerPresence = null;
+        } elseif ($this->isVarExpr($target->var)) {
             $container = $this->parseIdentifier($target->var);
             $this->checkVarMustExist($target->var, $container);
             $containerPresence = null;
@@ -2258,14 +2273,20 @@ trait AssignOpTrait
         $otherPresence = 'php::exists(' . $stableContainer . ', '
             . '{{php::ArrayDimFetch, ' . Type::VAR . '(' . $stableKey . ')}}, '
             . $selectedValue . ')';
+        if ($containerPresence !== null) {
+            // An absent outer dimension must not skip the inner key: the
+            // eventual write still needs it. Reset the container to null on
+            // that path as well, since loop iterations reuse these temporaries
+            // and a previous offsetGet() may have selected an object.
+            $container = '(' . $containerPresence . ' ? ' . $container
+                . ' : ' . Type::VAR . '(' . self::VALUE_NULL . '))';
+        }
         $probe = '((' . $stableContainer . ' = ' . $container . '), ('
             . $stableKey . ' = ' . $key . '), (' . $stableContainer . '.isObject() ? '
             . $objectPresence . ' : ' . $otherPresence . '))';
 
         return [
-            'condition' => $containerPresence === null
-                ? $probe
-                : '(' . $containerPresence . ' && ' . $probe . ')',
+            'condition' => $probe,
             'container' => $stableContainer,
             'key' => $stableKey,
         ];

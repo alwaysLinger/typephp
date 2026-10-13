@@ -148,6 +148,27 @@ trait ArrayExpressionTrait
         return $this->parseIdentifier($expr);
     }
 
+    /**
+     * An array write declares its undefined plain root as a fixed PHP array.
+     * Walk dimensions only: a property receiver or a key is still a read and
+     * must already exist. GLOBALS uses the separate global-slot resolver.
+     */
+    protected function declareArrayWriteRoot(Expr\ArrayDimFetch $target): void
+    {
+        $root = $target->var;
+        while ($root instanceof Expr\ArrayDimFetch) {
+            $root = $root->var;
+        }
+        if (!$root instanceof Expr\Variable || !is_string($root->name) || $root->name === 'GLOBALS') {
+            return;
+        }
+
+        $name = $this->parseIdentifier($root);
+        if (!$this->hasVar($name)) {
+            $this->addLocalVar($name, Type::ARRAY);
+        }
+    }
+
     protected function parseNodeWithUpdateAttribute(NodeAbstract $node, string $attribute, bool $update, callable $parser): string
     {
         $hadAttribute = $node->hasAttribute($attribute);
@@ -220,6 +241,9 @@ trait ArrayExpressionTrait
             return $this->parseStdContainerDimFetch($node);
         }
 
+        if ($write) {
+            $this->declareArrayWriteRoot($node);
+        }
         $isGlobals = $this->isVarExpr($node->var) && $node->var->name === 'GLOBALS';
         $var = $write ? $this->parseWritableIdentifier($node->var) : $this->parseIdentifier($node->var);
         if ($this->isVarExpr($node->var)) {
@@ -227,11 +251,7 @@ trait ArrayExpressionTrait
                 return $this->parseGlobalsArrayDimFetch($node);
             }
             if (!$this->hasVar($var)) {
-                if ($write) {
-                    $this->addLocalVar($var, Type::ARRAY);
-                } else {
-                    $this->errorUndefinedVariable($node->var);
-                }
+                $this->errorUndefinedVariable($node->var);
             }
             $this->assertArrayDimVariableTypeIsSupported($node, $var);
         }
