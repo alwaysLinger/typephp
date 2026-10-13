@@ -1890,6 +1890,9 @@ abstract class CompilerBase implements PropertyAccessContext
 
     protected function getLiteralString(string $string): string
     {
+        if ($string === '') {
+            return 'php::empty_string';
+        }
         if ($this->noLiteralStrings) {
             return $this->getInlineString($string);
         }
@@ -1905,6 +1908,9 @@ abstract class CompilerBase implements PropertyAccessContext
      */
     protected function getInlineString(string $string): string
     {
+        if ($string === '') {
+            return 'php::empty_string';
+        }
         return Type::STR . '{ZEND_STRL(' . $this->genCharPtr($string, true) . ')}';
     }
 

@@ -176,9 +176,7 @@ trait ClassConstantFetchTrait
             $internalConst = $this->getInternalScalarClassConstant($class, $const);
             if ($internalConst !== null) {
                 $value = $internalConst[0];
-                $expr->setAttribute(self::ATTR_LOWERED_TYPE, is_string($value)
-                    ? 'const char *'
-                    : $this->getTypeFromZendType(gettype($value)));
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $this->getTypeFromZendType(gettype($value)));
                 return $this->genInternalScalarConstantValue($internalConst[0]);
             }
             $ce = $this->getClassEntryPtr($class);

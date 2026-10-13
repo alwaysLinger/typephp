@@ -491,6 +491,56 @@ PHP);
         $this->assertSame('php::Str{ZEND_STRL("runtime")}.str()', $code);
     }
 
+    public function testEmptyStringsBypassTheLiteralTableInBothModes(): void
+    {
+        foreach ([false, true] as $noLiteralStrings) {
+            $this->setPropertyValue('noLiteralStrings', $noLiteralStrings);
+            foreach ([false, true] as $inline) {
+                $expr = new \PhpParser\Node\Scalar\String_('');
+                if ($inline) {
+                    $expr->setAttribute('noLiteralString', true);
+                }
+                $this->assertSame('php::empty_string', $this->invokeMethod('parseScalar', $expr));
+                $this->assertSame(Type::STR, $this->invokeMethod('getLoweredExpressionType', $expr));
+            }
+            $this->assertSame(
+                'php::empty_string.str()',
+                $this->invokeMethod('parseArrayKey', new \PhpParser\Node\Scalar\String_('')),
+            );
+            $this->assertArrayNotHasKey('', $this->getPropertyValue('literalStrings'));
+        }
+    }
+
+    public function testEmptyMagicConstantsUseStringStorage(): void
+    {
+        $this->setPropertyValue('context', new \TypePhp\Context\FunctionContext());
+        foreach ([false, true] as $noLiteralStrings) {
+            $this->setPropertyValue('noLiteralStrings', $noLiteralStrings);
+            foreach ([
+                new \PhpParser\Node\Scalar\MagicConst\Namespace_(),
+                new \PhpParser\Node\Scalar\MagicConst\Function_(),
+                new \PhpParser\Node\Scalar\MagicConst\Method(),
+                new \PhpParser\Node\Scalar\MagicConst\Property(),
+            ] as $expr) {
+                $this->assertSame('php::empty_string', $this->invokeMethod('parseMagicConst', $expr));
+                $this->assertSame(Type::STR, $this->invokeMethod('getLoweredExpressionType', $expr));
+            }
+        }
+    }
+
+    public function testEmptyInternalConstantUsesStringStorage(): void
+    {
+        $constants = $this->getPropertyValue('internalConstants');
+        $constants['AOT_EMPTY_INTERNAL_STRING'] = '';
+        $this->setPropertyValue('internalConstants', $constants);
+        foreach ([false, true] as $noLiteralStrings) {
+            $this->setPropertyValue('noLiteralStrings', $noLiteralStrings);
+            $expr = new \PhpParser\Node\Expr\ConstFetch(new \PhpParser\Node\Name('AOT_EMPTY_INTERNAL_STRING'));
+            $this->assertSame('php::empty_string', $this->invokeMethod('parseConstFetch', $expr));
+            $this->assertSame(Type::STR, $this->invokeMethod('getLoweredExpressionType', $expr));
+        }
+    }
+
     public function testDynamicallyDefinedConstantsAreNotInternalConstants(): void
     {
         $name = 'AOT_USER_DEFINE_' . str_replace('.', '_', uniqid('', true));

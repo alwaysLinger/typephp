@@ -6641,7 +6641,7 @@ CODE;
         $cppCode .= $indent . '_SERVER.item("SCRIPT_NAME", true) = value;' . PHP_EOL;
         $cppCode .= $indent . '_SERVER.item("SCRIPT_FILENAME", true) = value;' . PHP_EOL;
         $cppCode .= $indent . '_SERVER.item("PATH_TRANSLATED", true) = value;' . PHP_EOL;
-        $cppCode .= $indent . '_SERVER.item("DOCUMENT_ROOT", true) = "";' . PHP_EOL;
+        $cppCode .= $indent . '_SERVER.item("DOCUMENT_ROOT", true) = php::empty_string;' . PHP_EOL;
 
         return $cppCode . PHP_EOL;
     }

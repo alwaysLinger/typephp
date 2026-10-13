@@ -52,7 +52,7 @@ class ServerEnvironmentTest extends TestCase
         $this->assertStringContainsString('_SERVER.item("SCRIPT_NAME", true) = value;', $code);
         $this->assertStringContainsString('_SERVER.item("SCRIPT_FILENAME", true) = value;', $code);
         $this->assertStringContainsString('_SERVER.item("PATH_TRANSLATED", true) = value;', $code);
-        $this->assertStringContainsString('_SERVER.item("DOCUMENT_ROOT", true) = "";', $code);
+        $this->assertStringContainsString('_SERVER.item("DOCUMENT_ROOT", true) = php::empty_string;', $code);
         $this->assertStringNotContainsString('php::Str', $code);
     }
 

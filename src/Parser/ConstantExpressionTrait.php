@@ -66,14 +66,12 @@ trait ConstantExpressionTrait
                 return $this->getConstant($name);
             }
             if ($name === 'PHP_EOL') {
-                $expr->setAttribute(self::ATTR_LOWERED_TYPE, 'const char *');
-                return '"' . $this->escapeString(PHP_EOL) . '"';
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, Type::STR);
+                return $this->getLiteralString(PHP_EOL);
             }
             if ($this->isInternalScalarConstant($name)) {
                 $value = $this->internalConstants[$name];
-                $expr->setAttribute(self::ATTR_LOWERED_TYPE, is_string($value)
-                    ? 'const char *'
-                    : $this->getTypeFromZendType(gettype($value)));
+                $expr->setAttribute(self::ATTR_LOWERED_TYPE, $this->getTypeFromZendType(gettype($value)));
                 return $this->getInternalScalarConstantValue($name);
             }
             if ($this->isInternalConstant($name)) {
@@ -147,6 +145,7 @@ trait ConstantExpressionTrait
 
     protected function parseMagicConst(MagicConst $expr): string
     {
+        $expr->setAttribute(self::ATTR_LOWERED_TYPE, $expr instanceof MagicConst\Line ? Type::INT : Type::STR);
         $class = $this->classDef?->getNamespacedName(false)
             ?? (($this->namespace ? $this->namespace . '\\' : '') . $this->class);
         $function = $this->function;
@@ -155,23 +154,23 @@ trait ConstantExpressionTrait
         }
         switch ($expr->getType()) {
             case 'Scalar_MagicConst_Dir':
-                return '"' . $this->escapeString($this->dir) . '"';
+                return $this->getLiteralString($this->dir);
             case 'Scalar_MagicConst_File':
-                return '"' . $this->escapeString($this->file) . '"';
+                return $this->getLiteralString($this->file);
             case 'Scalar_MagicConst_Line':
                 return (string) $expr->getStartLine();
             case 'Scalar_MagicConst_Namespace':
-                return '"' . $this->escapeString($this->namespace) . '"';
+                return $this->getLiteralString($this->namespace);
             case 'Scalar_MagicConst_Property':
                 // Visitor normally folds this constant before property hooks
                 // are lowered to generated methods. Keep the fallback aligned
                 // with PHP, where it is an empty string outside a property.
-                return '""';
+                return 'php::empty_string';
             case 'Scalar_MagicConst_Function':
                 if ($this->context->closureMagicName !== null) {
-                    return '"' . $this->escapeString($this->context->closureMagicName) . '"';
+                    return $this->getLiteralString($this->context->closureMagicName);
                 }
-                return '"' . $this->escapeString($function) . '"';
+                return $this->getLiteralString($function);
             case 'Scalar_MagicConst_Class':
                 if (!$this->classDef) {
                     $this->fatalError($expr, 'The magic constant `__CLASS__` is not allowed in global scope');
@@ -179,23 +178,23 @@ trait ConstantExpressionTrait
                 if ($this->classDef->trait) {
                     return $this->getCalledClassExpr();
                 }
-                return '"' . $this->escapeString($class) . '"';
+                return $this->getLiteralString($class);
             case 'Scalar_MagicConst_Trait':
                 if ($this->methodDef?->traitOrigin !== '') {
-                    return '"' . $this->escapeString($this->methodDef->traitOrigin) . '"';
+                    return $this->getLiteralString($this->methodDef->traitOrigin);
                 }
                 if (!$this->classDef or !$this->classDef->trait) {
                     $this->fatalError($expr, 'The magic constant `__TRAIT__` is not allowed in global scope');
                 }
-                return '"' . $this->escapeString($class) . '"';
+                return $this->getLiteralString($class);
             case 'Scalar_MagicConst_Method':
                 if ($this->context->closureMagicName !== null) {
-                    return '"' . $this->escapeString($this->context->closureMagicName) . '"';
+                    return $this->getLiteralString($this->context->closureMagicName);
                 }
                 if ($this->methodDef === null) {
-                    return '"' . $this->escapeString($function) . '"';
+                    return $this->getLiteralString($function);
                 }
-                return '"' . $this->escapeString($class) . '::' . $this->escapeString($this->method) . '"';
+                return $this->getLiteralString($class . '::' . $this->method);
             default:
                 $this->unsupportedSyntax($expr);
                 break;
@@ -264,7 +263,7 @@ trait ConstantExpressionTrait
             return $value ? 'true' : 'false';
         }
         if (is_string($value)) {
-            return $this->genCharPtr($value, true);
+            return $this->getLiteralString($value);
         }
         $this->error('Unsupported constant type: ' . gettype($value));
     }
