@@ -115,7 +115,11 @@ trait SelectionExpressionTrait
         $code = $this->formatCapturedStmtLines($beforeStmts);
         $returnsReference = $valueType === Type::REF
             || ($valueExpr instanceof Expr\CallLike && $this->resolveRefReturningCall($valueExpr) !== false);
-        if ($nativeClass === '' && $returnType !== Type::VAR && ($beforeStmts || $afterStmts)) {
+        // A captured condition can force a typed lambda even when its branches
+        // emit no statements. Typed Zend properties may still lower to Variant;
+        // only a proven C++ storage type can cross this return boundary directly.
+        if ($nativeClass === '' && $returnType !== Type::VAR
+            && ($beforeStmts || $afterStmts || $this->getLoweredExpressionType($valueExpr) !== $returnType)) {
             $value = $this->convertExprFromType($returnType, $value);
         }
         if ($afterStmts || $returnsReference) {
