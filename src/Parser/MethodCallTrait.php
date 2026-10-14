@@ -320,6 +320,12 @@ trait MethodCallTrait
         // A Native class exists but the method was not found; this may be a dynamic call
         if (!$nativeFunc) {
             if ($this->hasClass($class) and $this->getNativeMethod($expr, $class, '__call', false)) {
+                // An instanceof pi-narrowed subclass may declare the exact
+                // method that falls back to the declared class' __call().
+                $narrowedFunc = $this->retryDevirtualizeWithPiNarrowing($expr, $object, $method, $class);
+                if ($narrowedFunc !== false) {
+                    return $narrowedFunc;
+                }
                 throw new DynamicCall();
             }
         }
@@ -330,23 +336,146 @@ trait MethodCallTrait
         // final/private methods and proven exact classes remain direct calls.
         if ($this->isOverrideMethod($fullMethodName) || $this->isBuildModeLib()) {
             if (!$this->canDevirtualize($object, $class, $method)) {
-                return false;
+                return $this->retryDevirtualizeWithPiNarrowing($expr, $object, $method, $class);
             }
         }
         if ($nativeFunc) {
             if ($this->hasClass($class) && $this->getMethodFlags($class, $method) & Modifiers::ABSTRACT) {
-                return false;
+                return $this->retryDevirtualizeWithPiNarrowing($expr, $object, $method, $class);
             }
             if ($object !== 'this_' && !isset($this->context->stableObjects[$object])
                 && ($this->isAbstractClass($class) || $this->isInterface($class))) {
-                return false;
+                return $this->retryDevirtualizeWithPiNarrowing($expr, $object, $method, $class);
             }
             $this->checkFunction($nativeFunc);
             if ($this->hasFunction($nativeFunc)) {
                 return $nativeFunc;
             }
         }
+        return $this->retryDevirtualizeWithPiNarrowing($expr, $object, $method, $class);
+    }
+
+    /**
+     * e-SSA pi fallback for method devirtualization.
+     *
+     * When normal resolution rejected a direct call, an enclosing
+     * `if ($a instanceof Foo)` arm provides runtime evidence that the receiver
+     * carries Foo-or-a-subclass. If the narrowed class yields a resolvable
+     * native target and still passes every existing safety predicate — the
+     * override check, canDevirtualize()'s final/private/exact-class gates,
+     * accessibility and native function existence — the generated code calls
+     * that target directly. Any statically incomplete shape (signatures that
+     * do not fit the call arguments, spread arguments, named arguments, an
+     * abstract target, a narrowed class whose subclasses override the method)
+     * keeps the runtime dispatch of the dynamic call unmodified.
+     *
+     * The narrowed class consumes only method dispatch. Scalar narrowings,
+     * property narrowing, dead-branch folding and check folding are EXP-02's
+     * territory; single-implementation interface reasoning is EXP-03's.
+     */
+    protected function retryDevirtualizeWithPiNarrowing(
+        CallLike $expr,
+        string $object,
+        string $method,
+        string $declaredClass,
+    ): string|false {
+        $pi = $this->getPiNarrowedObject($object);
+        if ($pi === null
+            || !$pi->condition instanceof Expr\Instanceof_
+            || !$this->isNameExpr($pi->condition->class)
+        ) {
+            return false;
+        }
+        $narrowedClass = $this->resolveCompileTimeInstanceofClass($pi->condition->class);
+        if ($narrowedClass === null || $narrowedClass === ''
+            || $narrowedClass === $declaredClass
+            || !$this->isObjectClassStaticallyAssignableTo($narrowedClass, $declaredClass)
+        ) {
+            return false;
+        }
+
+        // Quiet variant of getNativeMethod(): identical chain-walk and shape
+        // checks, but an inaccessible private/protected declaration skips the
+        // attempt instead of turning a runtime error into a new compile error.
+        $narrowedFunc = false;
+        $classDef = $this->hasClass($narrowedClass) ? $this->getClass($narrowedClass) : null;
+        while ($classDef !== null) {
+            if (!$classDef->hasMethod($method)) {
+                if (!$classDef->extends || !$this->hasClass($classDef->extends)) {
+                    break;
+                }
+                $classDef = $this->getClass($classDef->extends);
+                continue;
+            }
+            $methodDef = $classDef->getMethod($method);
+            if (!$this->checkAccessible($classDef, $methodDef->flags)) {
+                break;
+            }
+            if ($classDef->getMethodFlags($method) & Modifiers::ABSTRACT) {
+                break;
+            }
+            $narrowedFunc = $this->getNativeName($method, $classDef->namespace, $classDef->name);
+            break;
+        }
+        if (!$narrowedFunc) {
+            return false;
+        }
+
+        // Same override/devirtualize gate as the declared-class path.
+        if ($this->isOverrideMethod($this->getOverrideMethodName($narrowedClass, $method))
+            || $this->isBuildModeLib()
+        ) {
+            if (!$this->canDevirtualize($object, $narrowedClass, $method)) {
+                return false;
+            }
+        }
+        if (!$this->canNarrowedNativeMethodFitCallArgs($expr, $narrowedFunc)) {
+            return false;
+        }
+        if ($object !== 'this_' && !isset($this->context->stableObjects[$object])
+            && ($this->isAbstractClass($narrowedClass) || $this->isInterface($narrowedClass))
+        ) {
+            return false;
+        }
+        $this->checkFunction($narrowedFunc);
+        if ($this->hasFunction($narrowedFunc)) {
+            return $narrowedFunc;
+        }
         return false;
+    }
+
+    /**
+     * Quiet (non-fatal) copy of checkNativeCallArgs()'s argument-shape rules.
+     *
+     * The narrowed class may declare a different signature than the declared
+     * receiver class. A shape mismatch falls back to runtime dispatch instead
+     * of introducing a new compile error, so behavior previously accepted by
+     * the dynamic path is preserved verbatim.
+     */
+    protected function canNarrowedNativeMethodFitCallArgs(CallLike $expr, string $nativeFunc): bool
+    {
+        if (!$this->hasFunction($nativeFunc)) {
+            return false;
+        }
+        $funcDef = $this->getFunction($nativeFunc);
+        $args = $expr->getRawArgs();
+
+        if ($this->hasUnpackCallArg($args)) {
+            return false;
+        }
+        foreach ($args as $arg) {
+            if ($arg instanceof Node\Arg && $arg->name !== null) {
+                return false;
+            }
+        }
+        $argc = count($args);
+        if ($argc < $funcDef->argCountRequired) {
+            return false;
+        }
+        if (!$funcDef->hasVariadicArg() and $argc > count($funcDef->argInfoList)) {
+            return false;
+        }
+        return true;
     }
 
     /**

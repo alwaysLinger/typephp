@@ -17,6 +17,30 @@ class FunctionContext
     /** SSA builder for the current function. Built once per function, discarded with the context. */
     public ?SsaBuilder $ssaBuilder = null;
 
+    /**
+     * e-SSA pi constraints active at the current parse point.
+     *
+     * Ordered stack of per-branch maps: object variable name => Analysis\PiConstraint.
+     * Each map holds the `instanceof` narrowings granted by the most recently
+     * parsed conditional arm; only devirtualization consults it here. Scalar
+     * narrowings (is_int() and friends) stay unconsumed for EXP-02.
+     *
+     * @var array<int, array<string, \TypePhp\Analysis\PiConstraint>>
+     */
+    public array $piConstraintScopes = [];
+
+    /**
+     * Object variables that may take a different value anywhere in the function
+     * (redefined, by-reference, escaped, unset, φ). Pi devirtualization skips
+     * them so a pi constraint is never applied to a rebound variable.
+     *
+     * @var array<string, true>
+     */
+    public array $piUnsafeVars = [];
+
+    /** true when any block can be resumed through a goto label; pi is disabled in such functions. */
+    public bool $hasGotoBlocks = false;
+
     /** Map of SSA-stable object variable name => class name (SsaPropOptimizer). */
     public array $stableObjects = [];
 
@@ -193,6 +217,9 @@ class FunctionContext
         $this->stdContainers = [];
         $this->objectProps = [];
         $this->ssaBuilder = null;
+        $this->piConstraintScopes = [];
+        $this->piUnsafeVars = [];
+        $this->hasGotoBlocks = false;
         $this->stableObjects = [];
         $this->exactObjects = [];
         $this->hoistedProps = [];

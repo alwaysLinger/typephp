@@ -6925,6 +6925,7 @@ CODE;
             $ssaBuilder->build();
             $this->context->ssaBuilder = $ssaBuilder;
             $this->analyzeStableObjects($ssaBuilder);
+            $this->collectPiConstraintSafety($ssaBuilder);
             // Range-proven loop counters are safe to narrow even with
             // `use varint_types`: the optimizer rejects counters whose PHP
             // integer semantics could widen to float or otherwise escape.

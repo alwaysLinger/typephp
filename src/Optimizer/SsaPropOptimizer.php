@@ -68,6 +68,39 @@ trait SsaPropOptimizer
     }
 
     /**
+     * Pre-pass for pi-constraint consumers (devirtualization).
+     *
+     * A pi narrowing of an object variable is only trustworthy while the
+     * variable keeps the SSA value the instanceof condition tested. Any
+     * second definition (rebind), unset/kill, by-reference capture, escape
+     * (global/static/closure-use) or φ merge therefore demotes the variable
+     * for the whole function. goto/label flow can resume inside a branch
+     * without re-testing the condition, and disables pi for the function.
+     */
+    protected function collectPiConstraintSafety(SsaBuilder $ssa): void
+    {
+        $defCounts = [];
+        foreach ($ssa->ssaVars as $ssaVar) {
+            if ($ssaVar->flags & (SsaFlags::REFERENCE | SsaFlags::ESCAPED | SsaFlags::KILLED | SsaFlags::PHI)) {
+                $this->context->piUnsafeVars[$ssaVar->origName] = true;
+                continue;
+            }
+            $defCounts[$ssaVar->origName] = ($defCounts[$ssaVar->origName] ?? 0) + 1;
+        }
+        foreach ($defCounts as $varName => $defCount) {
+            if ($defCount > 1) {
+                $this->context->piUnsafeVars[$varName] = true;
+            }
+        }
+        foreach ($ssa->blocks as $block) {
+            if ($block->isGotoTarget) {
+                $this->context->hasGotoBlocks = true;
+                break;
+            }
+        }
+    }
+
+    /**
      * A declared return type is only an upper bound and may contain a subclass.
      * Only a sole, concrete `new` definition proves the runtime class exactly.
      */
