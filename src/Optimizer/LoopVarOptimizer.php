@@ -412,6 +412,26 @@ trait LoopVarOptimizer
             return false;
         }
 
+        // Local assignments have not been converted yet. A function's declared
+        // return type is available, but argument-dependent math inference may
+        // read a local property whose receiver is not registered in this scope.
+        // Range proofs only need a definite int signature; polymorphic math
+        // results are deliberately left to normal statement conversion.
+        if ($expr instanceof Expr\FuncCall) {
+            if (!$expr->name instanceof Node\Name || $expr->isFirstClassCallable()) {
+                return false;
+            }
+            $target = $this->resolveStaticFunctionCallTarget($expr->name);
+            $native = $this->findNativeFunction($target['nativeLookup']);
+            if ($native !== false) {
+                return $this->getFunction($native)->returnType === Type::INT;
+            }
+            if ($target['namespacedFallback']) {
+                return false;
+            }
+            return $this->detectFuncCallReturnType($this->parseIdentifier($expr->name)) === Type::INT;
+        }
+
         // This pass runs before statement conversion has populated all local
         // variable types. Avoid asking the general expression detector to
         // resolve chained/dynamic receivers here: apart from being needlessly

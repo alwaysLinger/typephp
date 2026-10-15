@@ -3840,7 +3840,8 @@ abstract class CompilerBase implements PropertyAccessContext
      */
     protected function detectMathCallReturnType(string $name, Expr\FuncCall $expr): ?string
     {
-        if ($expr->args === [] || $expr->args[0]->unpack) {
+        if (!in_array($name, ['abs', 'pow', 'sqrt', 'floor', 'ceil', 'round'], true)
+            || $expr->args === [] || $expr->args[0]->unpack) {
             return null;
         }
 
